@@ -66,4 +66,3 @@ class StoryProject:
             selected_story=StoryCandidate.from_dict(selected_data) if selected_data else None,
             shot_plan=[Shot.from_dict(item) for item in data["shot_plan"]],
         )
-

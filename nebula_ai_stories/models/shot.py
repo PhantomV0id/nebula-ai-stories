@@ -38,4 +38,3 @@ class Shot:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Shot":
         return cls(**data)
-

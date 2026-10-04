@@ -60,4 +60,3 @@ class NoveltyEngine:
             if not any(self.are_duplicates(candidate, accepted) for accepted in unique):
                 unique.append(candidate)
         return unique
-

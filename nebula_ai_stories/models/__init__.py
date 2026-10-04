@@ -3,4 +3,3 @@ from nebula_ai_stories.models.shot import Shot
 from nebula_ai_stories.models.story import StoryCandidate, StoryScore
 
 __all__ = ["Shot", "StoryCandidate", "StoryProject", "StoryScore"]
-

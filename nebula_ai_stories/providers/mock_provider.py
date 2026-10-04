@@ -80,4 +80,3 @@ class MockProvider(TextGenerationProvider):
                 item["tags"] = [*item["tags"], f"variant-{cycle + 1}"]
             payloads.append(item)
         return payloads
-

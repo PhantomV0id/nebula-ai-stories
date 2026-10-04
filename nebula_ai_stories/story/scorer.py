@@ -75,4 +75,3 @@ def rank_candidates(
         scored.append((candidate, scorer.score(candidate, novelty=novelty)))
         seen.append(candidate)
     return sorted(scored, key=lambda item: item[1].overall_score, reverse=True)
-

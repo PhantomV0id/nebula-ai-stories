@@ -105,4 +105,3 @@ class StoryScore:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "StoryScore":
         return cls(**data)
-

@@ -15,4 +15,3 @@ class StoryGenerator:
         if len(payloads) != count:
             raise ValueError(f"provider returned {len(payloads)} stories; expected {count}")
         return [StoryCandidate.from_dict(payload) for payload in payloads]
-

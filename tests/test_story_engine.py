@@ -153,4 +153,3 @@ def test_shot_prompts_keep_image_and_motion_concerns_separate() -> None:
     assert "smartphone" in shot.image_prompt.lower()
     assert "movement" in shot.motion_prompt.lower() or "motion" in shot.motion_prompt.lower()
     assert shot.image_prompt != shot.motion_prompt
-

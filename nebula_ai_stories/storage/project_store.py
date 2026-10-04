@@ -36,4 +36,3 @@ class ProjectStore:
             return StoryProject.from_dict(raw)
         except (KeyError, TypeError, ValueError) as exc:
             raise ProjectLoadError(str(exc)) from exc
-

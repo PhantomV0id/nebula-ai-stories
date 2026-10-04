@@ -10,4 +10,3 @@ class TextGenerationProvider(ABC):
     @abstractmethod
     def generate_story_payloads(self, count: int) -> list[dict[str, Any]]:
         """Return deterministic or generated story dictionaries."""
-

@@ -61,4 +61,3 @@ class ShotPlanner:
         terms = ("adult", "baby", "bird", "cat", "child", "crow", "dog", "duck", "kitten", "parrot", "pigeon", "puppy", "rabbit", "squirrel", "toddler", "tortoise")
         lowered = value.lower()
         return any(term in lowered for term in terms)
-

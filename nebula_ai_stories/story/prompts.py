@@ -18,4 +18,3 @@ def build_image_prompt(visual_description: str, camera: str) -> str:
 
 def build_motion_prompt(action: str) -> str:
     return f"{MOTION_STYLE}. Main movement: {action}."
-
