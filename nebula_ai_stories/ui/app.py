@@ -6,7 +6,9 @@ from tkinter import filedialog, messagebox, ttk
 
 from nebula_ai_stories.models.project import StoryProject
 from nebula_ai_stories.models.story import StoryCandidate
-from nebula_ai_stories.providers.mock_provider import MockProvider
+from nebula_ai_stories.providers.config import DEFAULT_BASE_URLS, ProviderConfig
+from nebula_ai_stories.providers.errors import ProviderError
+from nebula_ai_stories.providers.factory import create_provider
 from nebula_ai_stories.storage.project_store import ProjectLoadError, ProjectStore
 from nebula_ai_stories.story.generator import StoryGenerator
 from nebula_ai_stories.story.novelty import NoveltyEngine
@@ -17,16 +19,24 @@ from nebula_ai_stories.story.scorer import StoryScorer, rank_candidates
 class NebulaStoriesApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Nebula AI Stories — Story Engine V1")
+        self.root.title("Nebula AI Stories — Local AI Providers V1")
         self.root.geometry("1180x780")
 
-        self.generator = StoryGenerator(MockProvider())
+        self.generator = StoryGenerator(create_provider(ProviderConfig()))
         self.scorer = StoryScorer()
         self.novelty = NoveltyEngine()
         self.planner = ShotPlanner()
         self.store = ProjectStore()
         self.project = StoryProject()
         self.story_by_id: dict[str, StoryCandidate] = {}
+
+        self.provider_type_var = tk.StringVar(value="mock")
+        self.base_url_var = tk.StringVar(value="")
+        self.model_var = tk.StringVar(value="")
+        self.timeout_var = tk.StringVar(value="120")
+        self.temperature_var = tk.StringVar(value="0.8")
+        self.max_tokens_var = tk.StringVar(value="4096")
+        self.provider_status_var = tk.StringVar(value="Provider: Mock (offline)")
 
         self._build_ui()
 
@@ -37,6 +47,45 @@ class NebulaStoriesApp:
         ttk.Button(controls, text="Create Shot Plan", command=self.create_shot_plan).pack(side="left", padx=4)
         ttk.Button(controls, text="Save Project", command=self.save_project).pack(side="left", padx=4)
         ttk.Button(controls, text="Load Project", command=self.load_project).pack(side="left", padx=4)
+
+        provider_frame = ttk.LabelFrame(self.root, text="Story Provider", padding=8)
+        provider_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+        ttk.Label(provider_frame, text="Provider").grid(row=0, column=0, sticky="w", padx=(0, 4))
+        provider_combo = ttk.Combobox(
+            provider_frame,
+            textvariable=self.provider_type_var,
+            values=("mock", "lm_studio", "ollama"),
+            state="readonly",
+            width=14,
+        )
+        provider_combo.grid(row=0, column=1, sticky="w", padx=(0, 12))
+        provider_combo.bind("<<ComboboxSelected>>", self._on_provider_type_changed)
+
+        ttk.Label(provider_frame, text="Base URL").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        ttk.Entry(provider_frame, textvariable=self.base_url_var, width=30).grid(row=0, column=3, sticky="ew", padx=(0, 12))
+
+        ttk.Label(provider_frame, text="Model").grid(row=0, column=4, sticky="w", padx=(0, 4))
+        ttk.Entry(provider_frame, textvariable=self.model_var, width=24).grid(row=0, column=5, sticky="ew")
+
+        ttk.Label(provider_frame, text="Timeout (s)").grid(row=1, column=0, sticky="w", padx=(0, 4), pady=(8, 0))
+        ttk.Entry(provider_frame, textvariable=self.timeout_var, width=10).grid(row=1, column=1, sticky="w", pady=(8, 0))
+
+        ttk.Label(provider_frame, text="Temperature").grid(row=1, column=2, sticky="w", padx=(0, 4), pady=(8, 0))
+        ttk.Entry(provider_frame, textvariable=self.temperature_var, width=10).grid(row=1, column=3, sticky="w", pady=(8, 0))
+
+        ttk.Label(provider_frame, text="Max tokens").grid(row=1, column=4, sticky="w", padx=(0, 4), pady=(8, 0))
+        ttk.Entry(provider_frame, textvariable=self.max_tokens_var, width=10).grid(row=1, column=5, sticky="w", pady=(8, 0))
+
+        ttk.Label(provider_frame, textvariable=self.provider_status_var).grid(
+            row=2,
+            column=0,
+            columnspan=6,
+            sticky="w",
+            pady=(8, 0),
+        )
+        provider_frame.columnconfigure(3, weight=1)
+        provider_frame.columnconfigure(5, weight=1)
 
         content = ttk.Panedwindow(self.root, orient="horizontal")
         content.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -71,7 +120,15 @@ class NebulaStoriesApp:
         self.shots_text.pack(fill="both", expand=True)
 
     def generate_ideas(self) -> None:
-        candidates = self.generator.generate_candidates(20)
+        try:
+            config = self._provider_config_from_ui()
+            self.generator = StoryGenerator(create_provider(config))
+            candidates = self.generator.generate_candidates(20)
+        except (ProviderError, ValueError) as exc:
+            self.provider_status_var.set(f"Generation failed: {exc}")
+            messagebox.showerror("Story generation failed", str(exc))
+            return
+
         ranked = rank_candidates(candidates, self.scorer, self.novelty)
         scores = {candidate.id: score for candidate, score in ranked}
         self.project = StoryProject(generated_candidates=candidates, scores=scores)
@@ -79,6 +136,32 @@ class NebulaStoriesApp:
         self._refresh_tree(ranked)
         self._set_text(self.details_text, "Select a story to inspect its details and score breakdown.")
         self._set_text(self.shots_text, "Create a shot plan after selecting a story.")
+        provider_label = {
+            "mock": "Mock (offline)",
+            "lm_studio": f"LM Studio / {config.model}",
+            "ollama": f"Ollama / {config.model}",
+        }[config.provider_type]
+        self.provider_status_var.set(f"Generated 20 ideas with {provider_label}")
+
+    def _on_provider_type_changed(self, _event: object | None = None) -> None:
+        provider_type = self.provider_type_var.get()
+        self.base_url_var.set(DEFAULT_BASE_URLS.get(provider_type, ""))
+        if provider_type == "mock":
+            self.provider_status_var.set("Provider: Mock (offline)")
+        else:
+            display = "LM Studio" if provider_type == "lm_studio" else "Ollama"
+            self.provider_status_var.set(f"Provider: {display} — enter a local model name")
+
+    def _provider_config_from_ui(self) -> ProviderConfig:
+        max_tokens_text = self.max_tokens_var.get().strip()
+        return ProviderConfig(
+            provider_type=self.provider_type_var.get(),
+            base_url=self.base_url_var.get(),
+            model=self.model_var.get(),
+            timeout_seconds=float(self.timeout_var.get()),
+            temperature=float(self.temperature_var.get()),
+            max_tokens=int(max_tokens_text) if max_tokens_text else None,
+        )
 
     def _refresh_tree(self, ranked: list[tuple[StoryCandidate, object]] | None = None) -> None:
         self.tree.delete(*self.tree.get_children())

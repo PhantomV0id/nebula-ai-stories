@@ -1,16 +1,21 @@
 # Nebula AI Stories
 
-Nebula AI Stories is a local-first Windows desktop project for creating original short-form AI micro-story concepts. V1 focuses only on the story engine: generating ideas, scoring them with transparent deterministic heuristics, filtering near-duplicate mechanics, selecting a story, planning 2–4 readable shots, and saving/loading the project as JSON.
+Nebula AI Stories is a local-first Windows desktop project for creating original short-form AI micro-story concepts. The current version supports deterministic offline story ideas plus optional local LLM generation through LM Studio or Ollama. Generated ideas are validated, scored, filtered for novelty, ranked, selected, and converted into short shot plans.
 
 The target format is roughly 8–15 second vertical stories that feel like believable candid phone videos. They are designed to work visually with little or no dialogue, one simple conflict, a clear payoff, and actions that remain feasible for future image-to-video generation.
 
-## Current V1 workflow
+## Current workflow
 
-`Ideas → Score → Novelty → Select → Shot Plan`
+`Local LLM / Mock → Structured Ideas → Validate → Score → Novelty → Select → Shot Plan`
 
 Implemented now:
 
 - deterministic offline `MockProvider` with varied story families;
+- LM Studio provider using the local OpenAI-compatible `POST /v1/chat/completions` endpoint;
+- Ollama provider using local `POST /api/chat`;
+- configurable base URL, model, timeout, temperature, and max token budget;
+- robust extraction of JSON arrays from plain JSON, fenced JSON, or small model preambles;
+- explicit errors for unavailable local servers and malformed model output, with no silent Mock fallback;
 - validated `StoryCandidate`, `StoryScore`, `Shot`, and `StoryProject` models;
 - exact-count story generation;
 - replaceable heuristic story scoring and ranking;
@@ -46,10 +51,14 @@ python -m nebula_ai_stories
 
 In the app:
 
-1. Click **Generate 20 Ideas**.
-2. Select a ranked candidate to inspect the story and score breakdown.
-3. Click **Create Shot Plan**.
-4. Use **Save Project** / **Load Project** for local JSON projects.
+1. Choose `mock`, `lm_studio`, or `ollama` in **Story Provider**.
+2. For LM Studio or Ollama, enter the exact local model name. The default URLs are `http://127.0.0.1:1234` and `http://127.0.0.1:11434` respectively.
+3. Click **Generate 20 Ideas**.
+4. Select a ranked candidate to inspect the story and score breakdown.
+5. Click **Create Shot Plan**.
+6. Use **Save Project** / **Load Project** for local JSON projects.
+
+The application does not contact OpenAI or any cloud service. `MockProvider` remains fully offline. LM Studio and Ollama failures are shown directly and do not trigger an automatic fallback.
 
 ## Run tests
 
@@ -57,15 +66,15 @@ In the app:
 python -m pytest
 ```
 
-Tests do not require internet access, Ollama, LM Studio, ComfyUI, or a GPU.
+Tests do not require internet access, a running Ollama/LM Studio server, ComfyUI, or a GPU. Provider HTTP behavior is tested with deterministic fake responses.
 
 ## Folder structure
 
 ```text
 nebula_ai_stories/
   models/       # story, score, shot, and project data models
-  providers/    # text-generation provider interface + offline mock
-  story/        # generation, scoring, novelty, prompts, shot planning
+  providers/    # config, HTTP/JSON handling, Mock, LM Studio, Ollama
+  story/        # generation prompts, scoring, novelty, shot planning
   storage/      # JSON project persistence
   ui/           # Tkinter desktop UI
 tests/           # pytest coverage
@@ -76,7 +85,8 @@ outputs/         # future generated outputs (ignored except .gitkeep)
 ## Current limitations
 
 - Scoring and novelty detection are deterministic heuristics, not intelligent LLM evaluation.
-- `MockProvider` is deterministic sample content; Ollama and LM Studio providers are future work.
+- LM Studio/Ollama model quality depends on the local model selected by the user.
+- Local model discovery and automatic model selection are not implemented; enter the installed model name manually.
 - Shot planning uses a deliberately simple three-shot structure and does not generate media.
 - JSON schema version is currently `1`; unsupported versions fail with a handled load error.
 - The UI prioritizes function over styling.
