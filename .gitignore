@@ -15,3 +15,4 @@ outputs/*
 !outputs/.gitkeep
 data/*
 !data/.gitkeep
+data/provider_settings.json

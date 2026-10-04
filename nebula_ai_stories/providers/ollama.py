@@ -7,14 +7,14 @@ from nebula_ai_stories.providers.base import TextGenerationProvider
 from nebula_ai_stories.providers.config import ProviderConfig
 from nebula_ai_stories.providers.errors import ProviderConfigurationError, ProviderOutputError
 from nebula_ai_stories.providers.http import post_json
-from nebula_ai_stories.providers.json_extract import extract_story_payloads
-from nebula_ai_stories.story.generation_prompt import SYSTEM_PROMPT, build_story_generation_prompt
+from nebula_ai_stories.providers.local_provider import RepairingLocalProvider
+from nebula_ai_stories.story.generation_prompt import SYSTEM_PROMPT
 
 
 RequestFn = Callable[[str, dict[str, Any], float], dict[str, Any]]
 
 
-class OllamaProvider(TextGenerationProvider):
+class OllamaProvider(RepairingLocalProvider):
     def __init__(self, config: ProviderConfig, request_fn: RequestFn = post_json) -> None:
         if config.provider_type != "ollama":
             raise ProviderConfigurationError("OllamaProvider requires provider_type='ollama'")
@@ -23,7 +23,7 @@ class OllamaProvider(TextGenerationProvider):
         self.config = config
         self.request_fn = request_fn
 
-    def generate_story_payloads(self, count: int) -> list[dict[str, Any]]:
+    def _request_content(self, user_prompt: str) -> str:
         options: dict[str, Any] = {"temperature": self.config.temperature}
         if self.config.max_tokens is not None:
             options["num_predict"] = self.config.max_tokens
@@ -31,7 +31,7 @@ class OllamaProvider(TextGenerationProvider):
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_story_generation_prompt(count)},
+                {"role": "user", "content": user_prompt},
             ],
             "stream": False,
             "format": "json",
@@ -48,4 +48,4 @@ class OllamaProvider(TextGenerationProvider):
             raise ProviderOutputError("Ollama returned a malformed chat response") from exc
         if not isinstance(content, str):
             raise ProviderOutputError("Ollama returned non-text model output")
-        return extract_story_payloads(content, count)
+        return content

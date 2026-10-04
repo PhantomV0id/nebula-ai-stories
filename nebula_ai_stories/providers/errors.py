@@ -16,3 +16,7 @@ class ProviderResponseError(ProviderError):
 
 class ProviderOutputError(ProviderError):
     """The model output could not be converted into valid stories."""
+
+
+class ProviderGenerationError(ProviderOutputError):
+    """Story generation failed after the single allowed repair attempt."""

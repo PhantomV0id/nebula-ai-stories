@@ -5,15 +5,18 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from nebula_ai_stories.models.project import StoryProject
-from nebula_ai_stories.models.story import StoryCandidate
+from nebula_ai_stories.models.story import StoryCandidate, StoryScore
 from nebula_ai_stories.providers.config import DEFAULT_BASE_URLS, ProviderConfig
 from nebula_ai_stories.providers.errors import ProviderError
 from nebula_ai_stories.providers.factory import create_provider
+from nebula_ai_stories.providers.health import ProviderHealth, check_provider_health
 from nebula_ai_stories.storage.project_store import ProjectLoadError, ProjectStore
+from nebula_ai_stories.storage.settings_store import SettingsStore
 from nebula_ai_stories.story.generator import StoryGenerator
 from nebula_ai_stories.story.novelty import NoveltyEngine
 from nebula_ai_stories.story.planner import ShotPlanner
 from nebula_ai_stories.story.scorer import StoryScorer, rank_candidates
+from nebula_ai_stories.ui.background import BackgroundWorker
 
 
 class NebulaStoriesApp:
@@ -27,23 +30,29 @@ class NebulaStoriesApp:
         self.novelty = NoveltyEngine()
         self.planner = ShotPlanner()
         self.store = ProjectStore()
+        self.settings_store = SettingsStore()
+        self.worker = BackgroundWorker(self.root)
         self.project = StoryProject()
         self.story_by_id: dict[str, StoryCandidate] = {}
 
-        self.provider_type_var = tk.StringVar(value="mock")
-        self.base_url_var = tk.StringVar(value="")
-        self.model_var = tk.StringVar(value="")
-        self.timeout_var = tk.StringVar(value="120")
-        self.temperature_var = tk.StringVar(value="0.8")
-        self.max_tokens_var = tk.StringVar(value="4096")
+        saved = self.settings_store.load()
+        self.provider_type_var = tk.StringVar(value=str(saved.provider_type))
+        self.base_url_var = tk.StringVar(value=saved.base_url)
+        self.model_var = tk.StringVar(value=saved.model)
+        self.timeout_var = tk.StringVar(value=f"{saved.timeout_seconds:g}")
+        self.temperature_var = tk.StringVar(value=f"{saved.temperature:g}")
+        self.max_tokens_var = tk.StringVar(value="" if saved.max_tokens is None else str(saved.max_tokens))
         self.provider_status_var = tk.StringVar(value="Provider: Mock (offline)")
 
         self._build_ui()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._set_initial_provider_status(saved)
 
     def _build_ui(self) -> None:
         controls = ttk.Frame(self.root, padding=8)
         controls.pack(fill="x")
-        ttk.Button(controls, text="Generate 20 Ideas", command=self.generate_ideas).pack(side="left", padx=4)
+        self.generate_button = ttk.Button(controls, text="Generate 20 Ideas", command=self.generate_ideas)
+        self.generate_button.pack(side="left", padx=4)
         ttk.Button(controls, text="Create Shot Plan", command=self.create_shot_plan).pack(side="left", padx=4)
         ttk.Button(controls, text="Save Project", command=self.save_project).pack(side="left", padx=4)
         ttk.Button(controls, text="Load Project", command=self.load_project).pack(side="left", padx=4)
@@ -66,7 +75,8 @@ class NebulaStoriesApp:
         ttk.Entry(provider_frame, textvariable=self.base_url_var, width=30).grid(row=0, column=3, sticky="ew", padx=(0, 12))
 
         ttk.Label(provider_frame, text="Model").grid(row=0, column=4, sticky="w", padx=(0, 4))
-        ttk.Entry(provider_frame, textvariable=self.model_var, width=24).grid(row=0, column=5, sticky="ew")
+        self.model_combo = ttk.Combobox(provider_frame, textvariable=self.model_var, width=24, state="normal")
+        self.model_combo.grid(row=0, column=5, sticky="ew")
 
         ttk.Label(provider_frame, text="Timeout (s)").grid(row=1, column=0, sticky="w", padx=(0, 4), pady=(8, 0))
         ttk.Entry(provider_frame, textvariable=self.timeout_var, width=10).grid(row=1, column=1, sticky="w", pady=(8, 0))
@@ -77,10 +87,13 @@ class NebulaStoriesApp:
         ttk.Label(provider_frame, text="Max tokens").grid(row=1, column=4, sticky="w", padx=(0, 4), pady=(8, 0))
         ttk.Entry(provider_frame, textvariable=self.max_tokens_var, width=10).grid(row=1, column=5, sticky="w", pady=(8, 0))
 
+        self.check_provider_button = ttk.Button(provider_frame, text="Check Provider", command=self.check_provider)
+        self.check_provider_button.grid(row=1, column=6, sticky="e", padx=(12, 0), pady=(8, 0))
+
         ttk.Label(provider_frame, textvariable=self.provider_status_var).grid(
             row=2,
             column=0,
-            columnspan=6,
+            columnspan=7,
             sticky="w",
             pady=(8, 0),
         )
@@ -122,26 +135,69 @@ class NebulaStoriesApp:
     def generate_ideas(self) -> None:
         try:
             config = self._provider_config_from_ui()
-            self.generator = StoryGenerator(create_provider(config))
-            candidates = self.generator.generate_candidates(20)
         except (ProviderError, ValueError) as exc:
-            self.provider_status_var.set(f"Generation failed: {exc}")
-            messagebox.showerror("Story generation failed", str(exc))
+            self._show_provider_error("Story generation failed", exc)
             return
 
-        ranked = rank_candidates(candidates, self.scorer, self.novelty)
-        scores = {candidate.id: score for candidate, score in ranked}
-        self.project = StoryProject(generated_candidates=candidates, scores=scores)
-        self.story_by_id = {candidate.id: candidate for candidate in candidates}
-        self._refresh_tree(ranked)
-        self._set_text(self.details_text, "Select a story to inspect its details and score breakdown.")
-        self._set_text(self.shots_text, "Create a shot plan after selecting a story.")
-        provider_label = {
-            "mock": "Mock (offline)",
-            "lm_studio": f"LM Studio / {config.model}",
-            "ollama": f"Ollama / {config.model}",
-        }[config.provider_type]
-        self.provider_status_var.set(f"Generated 20 ideas with {provider_label}")
+        self._save_settings_safely(config)
+        self._set_provider_busy(True, "Generating...")
+
+        def task() -> tuple[ProviderConfig, list[StoryCandidate], list[tuple[StoryCandidate, StoryScore]], dict[str, StoryScore]]:
+            generator = StoryGenerator(create_provider(config))
+            candidates = generator.generate_candidates(20)
+            ranked = rank_candidates(candidates, self.scorer, self.novelty)
+            scores = {candidate.id: score for candidate, score in ranked}
+            return config, candidates, ranked, scores
+
+        def success(result: tuple[ProviderConfig, list[StoryCandidate], list[tuple[StoryCandidate, StoryScore]], dict[str, StoryScore]]) -> None:
+            used_config, candidates, ranked, scores = result
+            self.project = StoryProject(generated_candidates=candidates, scores=scores)
+            self.story_by_id = {candidate.id: candidate for candidate in candidates}
+            self._refresh_tree(ranked)
+            self._set_text(self.details_text, "Select a story to inspect its details and score breakdown.")
+            self._set_text(self.shots_text, "Create a shot plan after selecting a story.")
+            provider_label = {
+                "mock": "Mock (offline)",
+                "lm_studio": f"LM Studio / {used_config.model}",
+                "ollama": f"Ollama / {used_config.model}",
+            }[used_config.provider_type]
+            self.provider_status_var.set(f"Generated 20 ideas with {provider_label}")
+
+        self.worker.submit(
+            task,
+            success,
+            lambda exc: self._show_provider_error("Story generation failed", exc),
+            lambda: self._set_provider_busy(False),
+        )
+
+    def check_provider(self) -> None:
+        try:
+            config = self._provider_config_from_ui()
+        except (ProviderError, ValueError) as exc:
+            self._show_provider_error("Provider check failed", exc)
+            return
+
+        self._save_settings_safely(config)
+        self._set_provider_busy(True, "Checking provider...")
+
+        def success(health: ProviderHealth) -> None:
+            lines = [health.message]
+            if health.models:
+                lines.append("Models:")
+                lines.extend(f"- {model}" for model in health.models)
+                self.model_combo.configure(values=tuple(health.models))
+                if not self.model_var.get().strip():
+                    self.model_var.set(health.models[0])
+            else:
+                self.model_combo.configure(values=())
+            self.provider_status_var.set("\n".join(lines))
+
+        self.worker.submit(
+            lambda: check_provider_health(config),
+            success,
+            lambda exc: self._show_provider_error("Provider check failed", exc),
+            lambda: self._set_provider_busy(False),
+        )
 
     def _on_provider_type_changed(self, _event: object | None = None) -> None:
         provider_type = self.provider_type_var.get()
@@ -151,6 +207,7 @@ class NebulaStoriesApp:
         else:
             display = "LM Studio" if provider_type == "lm_studio" else "Ollama"
             self.provider_status_var.set(f"Provider: {display} — enter a local model name")
+        self.model_combo.configure(values=())
 
     def _provider_config_from_ui(self) -> ProviderConfig:
         max_tokens_text = self.max_tokens_var.get().strip()
@@ -162,6 +219,35 @@ class NebulaStoriesApp:
             temperature=float(self.temperature_var.get()),
             max_tokens=int(max_tokens_text) if max_tokens_text else None,
         )
+
+    def _set_initial_provider_status(self, config: ProviderConfig) -> None:
+        if config.provider_type == "mock":
+            self.provider_status_var.set("Mock Provider: Ready (offline)")
+        else:
+            display = "LM Studio" if config.provider_type == "lm_studio" else "Ollama"
+            self.provider_status_var.set(f"Provider: {display} — settings restored")
+
+    def _set_provider_busy(self, busy: bool, status: str | None = None) -> None:
+        state = "disabled" if busy else "normal"
+        self.generate_button.configure(state=state)
+        self.check_provider_button.configure(state=state)
+        if status is not None:
+            self.provider_status_var.set(status)
+
+    def _show_provider_error(self, title: str, exc: Exception) -> None:
+        message = str(exc) if isinstance(exc, (ProviderError, ValueError)) else f"Unexpected provider error: {exc}"
+        self.provider_status_var.set(message)
+        messagebox.showerror(title, message)
+
+    def _save_settings_safely(self, config: ProviderConfig | None = None) -> None:
+        try:
+            self.settings_store.save(config or self._provider_config_from_ui())
+        except (OSError, ValueError):
+            pass
+
+    def _on_close(self) -> None:
+        self._save_settings_safely()
+        self.root.destroy()
 
     def _refresh_tree(self, ranked: list[tuple[StoryCandidate, object]] | None = None) -> None:
         self.tree.delete(*self.tree.get_children())

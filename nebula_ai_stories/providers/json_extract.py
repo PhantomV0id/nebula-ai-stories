@@ -61,8 +61,10 @@ def extract_story_payloads(text: str, expected_count: int) -> list[dict[str, Any
     for index, item in enumerate(parsed, start=1):
         if not isinstance(item, dict):
             raise ProviderOutputError(f"Model output story {index} is not a JSON object")
+        normalized = dict(item)
+        normalized["id"] = f"story-{index:03d}"
         try:
-            validated = StoryCandidate.from_dict(item)
+            validated = StoryCandidate.from_dict(normalized)
         except (TypeError, ValueError, KeyError) as exc:
             raise ProviderOutputError(f"Model output story {index} is invalid: {exc}") from exc
         payloads.append(validated.to_dict())

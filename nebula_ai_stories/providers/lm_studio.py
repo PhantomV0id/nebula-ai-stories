@@ -6,15 +6,14 @@ from typing import Any
 from nebula_ai_stories.providers.config import ProviderConfig
 from nebula_ai_stories.providers.errors import ProviderConfigurationError, ProviderOutputError
 from nebula_ai_stories.providers.http import post_json
-from nebula_ai_stories.providers.json_extract import extract_story_payloads
-from nebula_ai_stories.providers.base import TextGenerationProvider
-from nebula_ai_stories.story.generation_prompt import SYSTEM_PROMPT, build_story_generation_prompt
+from nebula_ai_stories.providers.local_provider import RepairingLocalProvider
+from nebula_ai_stories.story.generation_prompt import SYSTEM_PROMPT
 
 
 RequestFn = Callable[[str, dict[str, Any], float], dict[str, Any]]
 
 
-class LMStudioProvider(TextGenerationProvider):
+class LMStudioProvider(RepairingLocalProvider):
     def __init__(self, config: ProviderConfig, request_fn: RequestFn = post_json) -> None:
         if config.provider_type != "lm_studio":
             raise ProviderConfigurationError("LMStudioProvider requires provider_type='lm_studio'")
@@ -23,12 +22,12 @@ class LMStudioProvider(TextGenerationProvider):
         self.config = config
         self.request_fn = request_fn
 
-    def generate_story_payloads(self, count: int) -> list[dict[str, Any]]:
+    def _request_content(self, user_prompt: str) -> str:
         body: dict[str, Any] = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_story_generation_prompt(count)},
+                {"role": "user", "content": user_prompt},
             ],
             "temperature": self.config.temperature,
             "stream": False,
@@ -47,4 +46,4 @@ class LMStudioProvider(TextGenerationProvider):
             raise ProviderOutputError("LM Studio returned a malformed chat completion response") from exc
         if not isinstance(content, str):
             raise ProviderOutputError("LM Studio returned non-text model output")
-        return extract_story_payloads(content, count)
+        return content

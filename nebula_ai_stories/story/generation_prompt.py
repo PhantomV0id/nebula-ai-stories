@@ -33,3 +33,15 @@ Rules:
 - id values must be unique strings such as story-001, story-002, ...
 
 Output JSON array only."""
+
+
+def build_story_repair_prompt(count: int, validation_problem: str) -> str:
+    if count < 1:
+        raise ValueError("count must be at least 1")
+    problem = " ".join(validation_problem.strip().split()) or "The batch did not validate."
+    return f"""The previous story batch failed validation for this reason only:
+{problem}
+
+Return the full corrected JSON story batch with exactly {count} objects.
+Keep the same StoryCandidate schema and all original content rules.
+Correct the validation problem above. Return JSON only with no markdown or explanation."""
