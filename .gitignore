@@ -16,3 +16,4 @@ outputs/*
 data/*
 !data/.gitkeep
 data/provider_settings.json
+data/comfyui_settings.json
